@@ -7,9 +7,20 @@ from multiprocessing.shared_memory import SharedMemory
 from nanovllm.config import Config
 from nanovllm.engine.sequence import Sequence
 from nanovllm.models.qwen3 import Qwen3ForCausalLM
+from nanovllm.models.youtu_nanovllm import YoutuForCausalLM
 from nanovllm.layers.sampler import Sampler
 from nanovllm.utils.context import set_context, get_context, reset_context
 from nanovllm.utils.loader import load_model
+
+
+def get_model_class(hf_config):
+    model_type = getattr(hf_config, "model_type", None)
+    if model_type == "qwen3":
+        return Qwen3ForCausalLM
+    elif model_type == "youtu_llm":
+        return YoutuForCausalLM
+    else:
+        raise ValueError(f"Unknown model: {model_type}")
 
 
 class ModelRunner:
@@ -28,7 +39,9 @@ class ModelRunner:
         default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(hf_config.torch_dtype)
         torch.set_default_device("cuda")
-        self.model = Qwen3ForCausalLM(hf_config)
+        #self.model = Qwen3ForCausalLM(hf_config)
+        model_class = get_model_class(hf_config)
+        self.model = model_class(hf_config)
         load_model(self.model, config.model)
         self.sampler = Sampler()
         self.warmup_model()
@@ -88,6 +101,18 @@ class ModelRunner:
         method = getattr(self, method_name, None)
         return method(*args)
 
+    def _get_attention_cls(self):
+        """Find the attention class used by the model (for cache config dispatch).
+
+        Walks through submodules and looks for a class that defines
+        ``get_cache_config`` (e.g. YoutuAttention / MLA-style attention).
+        """
+        for module in self.model.modules():
+            cls = type(module)
+            if hasattr(cls, "get_cache_config"):
+                return cls
+        return None
+
     def warmup_model(self):
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
@@ -104,8 +129,13 @@ class ModelRunner:
         used = total - free
         peak = torch.cuda.memory_stats()["allocated_bytes.all.peak"]
         current = torch.cuda.memory_stats()["allocated_bytes.all.current"]
-        num_kv_heads = hf_config.num_key_value_heads // self.world_size
-        head_dim = getattr(hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads)
+        # Check if the model's attention class provides a custom cache config (e.g. MLA)
+        attn_cls = self._get_attention_cls()
+        if attn_cls is not None and hasattr(attn_cls, "get_cache_config"):
+            num_kv_heads, head_dim = attn_cls.get_cache_config(hf_config, self.world_size)
+        else:
+            num_kv_heads = hf_config.num_key_value_heads // self.world_size
+            head_dim = getattr(hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads)
         block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * head_dim * hf_config.torch_dtype.itemsize
         config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
         assert config.num_kvcache_blocks > 0
