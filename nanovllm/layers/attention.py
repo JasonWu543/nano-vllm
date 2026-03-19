@@ -7,7 +7,7 @@ from flash_attn import flash_attn_varlen_func, flash_attn_with_kvcache
 from nanovllm.utils.context import get_context
 from flash_mla import get_mla_metadata, flash_mla_with_kvcache
 
-#TODO：测试修改后的KV cache逻辑？
+#TODO：目前存了K和V，后面把存V的相关代码删了
 #MODEL runner也跟着改了一部分
 @triton.jit
 def store_kvcache_kernel(
