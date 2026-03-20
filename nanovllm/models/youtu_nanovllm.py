@@ -154,6 +154,7 @@ class YoutuAttention(nn.Module):
             self.k_head_dim,
             self.scale,
             self.num_heads,
+            self.kv_lora_rank,
         )
 
         # ===================== Output projection =====================
@@ -189,6 +190,9 @@ class YoutuAttention(nn.Module):
 
         # W_UV: [H, v, r] -> for (attn_weights @ c_kv) @ W_UV^T => [H, v]
         self._w_vo = W_kv_b[head_start:head_end, self.qk_nope_head_dim:, :].contiguous()
+        
+        self.attn._w_key = self._w_key
+        self.attn._w_vo = self._w_vo
 
     def forward(
         self,
@@ -220,7 +224,7 @@ class YoutuAttention(nn.Module):
         kv_c_normed = self.kv_a_layernorm(kv_c)  # [N, kv_lora_rank]
         q_nope_t = q_nope.transpose(0, 1)  # [H, N, nope]
         if context.is_prefill:
-            q_absorbed=q_nope_t
+            q_absorbed=q_nope
         else:
             q_absorbed = torch.bmm(q_nope_t, self._w_key)  # [H, N, r]
             q_absorbed = q_absorbed.transpose(0, 1)  # [N, H, r]
