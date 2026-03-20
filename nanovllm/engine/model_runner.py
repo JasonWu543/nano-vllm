@@ -131,15 +131,45 @@ class ModelRunner:
         current = torch.cuda.memory_stats()["allocated_bytes.all.current"]
         # Check if the model's attention class provides a custom cache config (e.g. MLA)
         attn_cls = self._get_attention_cls()
+<<<<<<< HEAD
+        # 简单判断一下是不是 MLA 架构
+        is_mla = False
+        if attn_cls is not None and ("MLA" in attn_cls.__name__ or getattr(hf_config, "kv_lora_rank", 0) > 0):
+            is_mla = True
+=======
+>>>>>>> origin/main
         if attn_cls is not None and hasattr(attn_cls, "get_cache_config"):
             num_kv_heads, head_dim = attn_cls.get_cache_config(hf_config, self.world_size)
         else:
             num_kv_heads = hf_config.num_key_value_heads // self.world_size
             head_dim = getattr(hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads)
+<<<<<<< HEAD
+        #MLA分支
+        if is_mla:
+            assert self.block_size==64
+            kv_lora_rank = getattr(hf_config, "kv_lora_rank", 512)
+            qk_rope_head_dim = getattr(hf_config, "qk_rope_head_dim", 64)
+            latent_dim = kv_lora_rank + qk_rope_head_dim
+            assert latent_dim in [512, 576]
+            block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * latent_dim 
+        else:
+            block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * head_dim * hf_config.torch_dtype.itemsize
+        config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
+        assert config.num_kvcache_blocks > 0
+        #MLA分支
+        if is_mla:
+            self.kv_cache=torch.empty(
+                2,hf_config.num_hidden_layers,config.num_kvcache_blocks, self.block_size, latent_dim,
+                dtype=hf_config.torch_dtype,device='cuda'
+            )
+        else:
+            self.kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, head_dim)
+=======
         block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * head_dim * hf_config.torch_dtype.itemsize
         config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
         assert config.num_kvcache_blocks > 0
         self.kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, head_dim)
+>>>>>>> origin/main
         layer_id = 0
         for module in self.model.modules():
             if hasattr(module, "k_cache") and hasattr(module, "v_cache"):

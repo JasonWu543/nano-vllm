@@ -27,6 +27,10 @@ class LLMEngine:
             process.start()
             self.ps.append(process)
             self.events.append(event)
+<<<<<<< HEAD
+        print(config)
+=======
+>>>>>>> origin/main
         self.model_runner = ModelRunner(config, 0, self.events)
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
