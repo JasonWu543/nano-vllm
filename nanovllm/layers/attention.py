@@ -76,6 +76,7 @@ class Attention(nn.Module):
         if context.is_prefill:
             if context.block_tables is not None:    # prefix cache
                 k, v = k_cache, v_cache #TODO 把这的prefill换成flash attn
+            #TODO   解压k，v
             o_prefill = eager_attention_forward_varlen(
                 q=q,
                 k=k,

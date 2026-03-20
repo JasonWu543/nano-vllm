@@ -16,7 +16,7 @@ from nanovllm.layers.linear import (
 )
 from nanovllm.layers.rotary_embedding import get_rope
 from nanovllm.layers.embed_head import VocabParallelEmbedding, ParallelLMHead
-
+from nanovllm.utils.context import get_context
 
 class YoutuMLP(nn.Module):
 
@@ -196,7 +196,7 @@ class YoutuAttention(nn.Module):
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
         # hidden_states: [N, hidden_size]
-
+        context = get_context()
         # Lazy init absorbed weights
         if self._w_key is None:
             self._init_absorbed_weights()
@@ -219,8 +219,11 @@ class YoutuAttention(nn.Module):
         )
         kv_c_normed = self.kv_a_layernorm(kv_c)  # [N, kv_lora_rank]
         q_nope_t = q_nope.transpose(0, 1)  # [H, N, nope]
-        q_absorbed = torch.bmm(q_nope_t, self._w_key)  # [H, N, r]
-        q_absorbed = q_absorbed.transpose(0, 1)  # [N, H, r]
+        if context.is_prefill:
+            q_absorbed=q_nope_t
+        else:
+            q_absorbed = torch.bmm(q_nope_t, self._w_key)  # [H, N, r]
+            q_absorbed = q_absorbed.transpose(0, 1)  # [N, H, r]
         k_rope = k_rope.unsqueeze(1)  # [N, 1, rope]
         q_rope, k_rope = self.rotary_emb(positions, q_rope, k_rope)
         q_states = torch.cat([q_absorbed, q_rope], dim=-1)
@@ -234,13 +237,14 @@ class YoutuAttention(nn.Module):
         v_states = v_states.expand(-1, self.num_heads, -1)  # [N, H, k_head_dim]
 
         o = self.attn(q_states, k_states, v_states)  # [N, H, k_head_dim]
-        o = o[..., :self.kv_lora_rank]  # [N, H, kv_lora_rank]
-        o_t = o.transpose(0, 1)  # [H, N, r]
-        o_v = torch.bmm(o_t, self._w_vo.transpose(1, 2))  # [H, N, v]
-        o_v = o_v.transpose(0, 1)  # [N, H, v]
-
-        # ===================== Output projection =====================
-        output = self.o_proj(o_v.flatten(1, -1))  # [N, hidden_size]
+        if context.is_prefill:
+            output = self.o_proj(o.flatten(1,-1))
+        else:
+            o = o[..., :self.kv_lora_rank]  # [N, H, kv_lora_rank]
+            o_t = o.transpose(0, 1)  # [H, N, r]
+            o_v = torch.bmm(o_t, self._w_vo.transpose(1, 2))  # [H, N, v]
+            o_v = o_v.transpose(0, 1)  # [N, H, v]
+            output = self.o_proj(o_v.flatten(1, -1))  # [N, hidden_size]
         return output
 
 
@@ -271,6 +275,7 @@ class YoutuDecoderLayer(nn.Module):
         )
         self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+
     def forward(
         self,
         positions: torch.Tensor,
