@@ -52,7 +52,7 @@ def load_model(model: nn.Module, path: str):
     weight_name_mapping = getattr(model, "weight_name_mapping", {})
 
     skip_keywords = [
-        ".mlp.",
+      
         ".experts.",
         ".gate.",
         ".shared_experts.",

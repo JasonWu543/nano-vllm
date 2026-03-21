@@ -293,7 +293,7 @@ class YoutuDecoderLayer(nn.Module):
 
         hidden_states = self.self_attn(positions, hidden_states)
         hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
-
+        hidden_states = self.mlp(hidden_states)
         # smoke test: 跳过最后的 MLP / MoE
         return hidden_states, residual
 
