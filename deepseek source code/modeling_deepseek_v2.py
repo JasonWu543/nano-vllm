@@ -371,6 +371,24 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
     return q_embed, k_embed
 
 
+"""
+DeepseekV2MLP 是一个通用的 FFN 单元，支持以下三种使用场景：
+
+1. Dense FFN (全量专家层):
+   - 用法: DeepseekV2MLP(config)
+   - 场景: 模型的前几层非 MoE 层。
+   - 特点: intermediate_size 最大（标准大小），计算密集，学习基础通用特征。
+
+2. Routed Expert (路由专家层):
+   - 用法: DeepseekV2MLP(config, intermediate_size=config.moe_intermediate_size)
+   - 场景: MoE 层中的细粒度专家（如 160 个中的一个）。
+   - 特点: intermediate_size 较小（通常为 dense 的 1/8），实现“高参数量、低计算量”的稀疏激活。
+
+3. Shared Expert (共享专家层):
+   - 用法: DeepseekV2MLP(config, intermediate_size=config.moe_intermediate_size * config.n_shared_experts)
+   - 场景: MoE 层中所有 token 必经的公共路径。
+   - 特点: 将多个共享专家合并为一个宽矩阵运算，确保模型捕获跨域的通用知识并提升吞吐。
+"""
 class DeepseekV2MLP(nn.Module):
     def __init__(self, config, hidden_size=None, intermediate_size=None):
         super().__init__()
@@ -437,9 +455,11 @@ class MoEGate(nn.Module):
                 scores, k=self.top_k, dim=-1, sorted=False
             )
         elif self.topk_method == "group_limited_greedy":
+            # Step 1：把 n_experts 分成 n_group 组，每组取组内最高分作为这组的代表分
             group_scores = (
                 scores.view(bsz * seq_len, self.n_group, -1).max(dim=-1).values
             )  # [n, n_group]
+            # Step 2：在组间做 topk，选出 topk_group 个组
             group_idx = torch.topk(
                 group_scores, k=self.topk_group, dim=-1, sorted=False
             )[
@@ -447,6 +467,7 @@ class MoEGate(nn.Module):
             ]  # [n, top_k_group]
             group_mask = torch.zeros_like(group_scores)  # [n, n_group]
             group_mask.scatter_(1, group_idx, 1)  # [n, n_group]
+            # Step 3：把组 mask 广播到 expert 维度，未选中的组的 expert 强制清零
             score_mask = (
                 group_mask.unsqueeze(-1)
                 .expand(
@@ -570,6 +591,7 @@ class DeepseekV2MoE(nn.Module):
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         flat_topk_idx = topk_idx.view(-1)
         if self.training:
+            # 训练阶段：直接遍历所有专家进行计算，保存计算图以支持反向传播
             hidden_states = hidden_states.repeat_interleave(
                 self.num_experts_per_tok, dim=0
             )
@@ -581,6 +603,7 @@ class DeepseekV2MoE(nn.Module):
             y = y.view(*orig_shape)
             y = AddAuxiliaryLoss.apply(y, aux_loss)
         else:
+            # 推理阶段：调用深度优化的 moe_infer 函数，涉及 Token 重排与高效的并发计算
             y = self.moe_infer(hidden_states, topk_idx, topk_weight).view(*orig_shape)
         if self.config.n_shared_experts is not None:
             y = y + self.shared_experts(identity)
@@ -588,12 +611,17 @@ class DeepseekV2MoE(nn.Module):
 
     @torch.no_grad()
     def moe_infer(self, x, topk_ids, topk_weight):
+        # 统计每个专家分配到的 Token 数量
         cnts = topk_ids.new_zeros((topk_ids.shape[0], len(self.experts)))
         cnts.scatter_(1, topk_ids, 1)
         tokens_per_expert = cnts.sum(dim=0)
+        
+        # 根据目标的专家 ID，对所有 Token 进行全局排序聚合，实现连续内存读取加速
         idxs = topk_ids.view(-1).argsort()
         sorted_tokens = x[idxs // topk_ids.shape[1]]
         sorted_tokens_shape = sorted_tokens.shape
+        
+        # 如果开启了跨设备的专家并行 (Expert Parallelism)，需要进行 distributed All-To-All 通信
         if self.ep_size > 1:
             tokens_per_ep_rank = tokens_per_expert.view(self.ep_size, -1).sum(dim=1)
             tokens_per_expert_group = tokens_per_expert.new_empty(
@@ -611,6 +639,7 @@ class DeepseekV2MoE(nn.Module):
                 tokens_per_expert_group.sum(dim=0).cpu().item(), sorted_tokens.shape[1]
             )
             input_split_sizes = tokens_per_ep_rank.cpu().numpy().tolist()
+            # 第一次 All-To-All 通信：将 Token 发送到对应的远端专家所在的 GPU 并把对应特征收拢到本地
             dist.all_to_all(
                 list(gathered_tokens.split(output_splits)),
                 list(sorted_tokens.split(input_split_sizes)),
@@ -645,12 +674,14 @@ class DeepseekV2MoE(nn.Module):
             new_x = torch.empty_like(outs)
             new_x[gatherd_idxs] = outs
             gathered_tokens = new_x.new_empty(*sorted_tokens_shape)
+            # 第二次 All-To-All 通信：将远端专家算出的结果发回给原本的 GPU
             dist.all_to_all(
                 list(gathered_tokens.split(input_split_sizes)),
                 list(new_x.split(output_splits)),
             )
             outs = gathered_tokens
 
+        # 把原本按需打乱连续排列的 Token 重新拼回最初输入模型的顺序
         new_x = torch.empty_like(outs)
         new_x[idxs] = outs
         final_out = (
@@ -664,6 +695,7 @@ class DeepseekV2MoE(nn.Module):
 
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
+# 只有GQA才会用，我们的MLA不需要用这个
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     """
     This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
@@ -814,18 +846,28 @@ class DeepseekV2Attention(nn.Module):
         bsz, q_len, _ = hidden_states.size()
 
         q = self.q_b_proj(self.q_a_layernorm(self.q_a_proj(hidden_states)))
+        # hidden → [B,S, q_lora_rank] → RMSNorm → [B,S, H * q_head_dim]
         q = q.view(bsz, q_len, self.num_heads, self.q_head_dim).transpose(1, 2)
+        # → [B, H, S, q_head_dim]
+
         q_nope, q_pe = torch.split(
             q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1
         )
+        # q_nope: 语义部分，不加位置编码
+        # q_pe:   位置部分，待加 RoPE
 
         compressed_kv = self.kv_a_proj_with_mqa(hidden_states)
         compressed_kv, k_pe = torch.split(
             compressed_kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
         )
+        # compressed_kv: [B, S, kv_lora_rank]  ← 推理时 KV cache 只需缓存这个
+        # k_pe:          [B, S, qk_rope_head_dim]  ← 还需要缓存这个
+
         k_pe = k_pe.view(bsz, q_len, 1, self.qk_rope_head_dim).transpose(1, 2)
+        # → [B, 1, S, rope_dim]，注意 head 维是 1（MQA 风格，所有 head 共享同一个 k_pe）
+
         kv = (
-            self.kv_b_proj(self.kv_a_layernorm(compressed_kv))
+            self.kv_b_proj(self.kv_a_layernorm(compressed_kv)) # [B,S, kv_lora_rank] → RMSNorm → [B,S, H*(qk_nope_dim + v_dim)]
             .view(bsz, q_len, self.num_heads, self.qk_nope_head_dim + self.v_head_dim)
             .transpose(1, 2)
         )
@@ -833,6 +875,10 @@ class DeepseekV2Attention(nn.Module):
         k_nope, value_states = torch.split(
             kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1
         )
+        # k_nope:       [B, H, S, qk_nope_dim]
+        # value_states: [B, H, S, v_head_dim]
+        # 一次矩阵乘法同时展开两者，节省一次 projection
+
         kv_seq_len = value_states.shape[-2]
         if past_key_value is not None:
             if self.layer_idx is None:
