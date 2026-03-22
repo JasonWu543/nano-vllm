@@ -8,7 +8,7 @@ from nanovllm.utils.context import get_context
 from flash_mla import get_mla_metadata, flash_mla_with_kvcache
 
 #TODO：目前存了K和V，后面把存V的相关代码删了
-#MODEL runner也跟着改了一部分
+#MODEL runner也跟着改了一部分   #blockD pad会不会导致问题？ #key.stride(0)是否有误？ 感觉只有这两个地方可能出问题
 @triton.jit
 def store_kvcache_kernel(
     key_ptr,
