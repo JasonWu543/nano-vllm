@@ -769,8 +769,8 @@ class YoutuDecoderLayer(GradientCheckpointingLayer):
         hidden_states = self.mlp(hidden_states)
         print("after self.mlp:")
         print("hidden_states.shape =", hidden_states.shape)
-        print("hidden_states[:, :8] =")
-        print(hidden_states[:, :8])
+        print("hidden_states[:1,:3,:8] =")
+        print(hidden_states[:1,:3,:8])
           
         hidden_states = residual + hidden_states
         return hidden_states
@@ -887,8 +887,8 @@ class YoutuModel(YoutuPreTrainedModel):
         hidden_states = self.norm(hidden_states)
         print("after self.norm:")
         print("hidden_states.shape =", hidden_states.shape)
-        print("hidden_states[:, :8] =")
-        print(hidden_states[:, :8])
+        print("hidden_states[:1,:3,:8] =")
+        print(hidden_states[:1,:3,:8])
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=past_key_values,
