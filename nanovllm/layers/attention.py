@@ -8,7 +8,7 @@ from nanovllm.utils.context import get_context
 from flash_mla import get_mla_metadata, flash_mla_with_kvcache
 
 #TODO：目前存了K和V，后面把存V的相关代码删了
-#MODEL runner也跟着改了一部分   #blockD pad会不会导致问题？ #key.stride(0)是否有误？ 感觉只有这两个地方可能出问题
+#MODEL runner也跟着改了一部分   
 @triton.jit
 def store_kvcache_kernel(
     key_ptr,
@@ -36,20 +36,22 @@ def store_kvcache_kernel(
 
 
 def store_kvcache(key: torch.Tensor, value: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tensor, slot_mapping: torch.Tensor):
+    k_stride=key.stride(0)
+    v_stride=value.stride(0)
     if key.dim()==3:
         key=key[:,0,:]
         value=value[:,0,:]  #only head0
     N,D=key.shape
     #padding
     BLOCK_D=triton.next_power_of_2(D)
-
+    
     if key.stride(-1)!=1:
         key=key.contiguous()
     if value.stride(-1)!=1:
         value=value.contiguous()
     
     assert slot_mapping.numel() == N
-    store_kvcache_kernel[(N,)](key, key.stride(0), value, value.stride(0), k_cache, v_cache, slot_mapping, D ,BLOCK_D=BLOCK_D)
+    store_kvcache_kernel[(N,)](key, k_stride, value, v_stride, k_cache, v_cache, slot_mapping, D ,BLOCK_D=BLOCK_D)
 
 
 class Attention(nn.Module):
