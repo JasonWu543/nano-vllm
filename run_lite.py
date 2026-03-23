@@ -52,3 +52,28 @@ with torch.no_grad():
     outputs = model(input_ids=inputs["input_ids"])
     print(f"\n输入: {prompt}")
     print(f"第一层输出 Hidden States Shape: {outputs.logits.shape}")
+
+# 6. Decode 阶段：生成前五个 token
+print("\n=== Decode Stage: Generating 5 tokens ===")
+generated_tokens = []
+current_input_ids = inputs["input_ids"]
+
+for i in range(32):
+    with torch.no_grad():
+        outputs = model(input_ids=current_input_ids)
+        logits = outputs.logits[:, -1, :]  # 取最后一个 token 的 logits
+        next_token = torch.argmax(logits, dim=-1).item()
+        generated_tokens.append(next_token)
+        decoded_token = tokenizer.decode(next_token)
+
+        print(f"Step {i+1}: Generated token {next_token} ({decoded_token})")
+
+        # 更新输入
+        next_token_tensor = torch.tensor([[next_token]], dtype=torch.long)
+        current_input_ids = torch.cat([current_input_ids, next_token_tensor], dim=1)
+
+print(f"\nGenerated token IDs: {generated_tokens}")
+print("Generated text tokens:")
+print(" | ".join(tokenizer.decode(t) for t in generated_tokens))
+print("\nGenerated text merged:")
+print(tokenizer.decode(generated_tokens))
