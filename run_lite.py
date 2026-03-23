@@ -34,7 +34,7 @@ config = YoutuConfig(
 model = YoutuForCausalLM(config)
 
 # 3. 加载权重 (请修改为你的实际路径)
-ckpt_path = os.path.abspath("/root/autodl-tmp/models")
+ckpt_path = os.path.abspath("/root/autodl-tmp/models/DeepSeek-V2-Lite")
 load_model_first_layer(model, ckpt_path)
 
 # 4. Tokenizer 处理文本
