@@ -714,17 +714,10 @@ class YoutuMLAttention(nn.Module):
         attn_output = attn_output.reshape(
             batch_size, seq_length, -1
         ).contiguous()
-        print("after attention_interface:")
-        print("attn_output.shape1 =", attn_output.shape)
-        print("attn_output1[:1, :3, :8] =")
-        print(attn_output[:1, :3, :8])
+     
         attn_output = self.o_proj(attn_output)
         
-        if past_key_values is None:
-            print("after o_proj")
-            print("attn_output.shape2 =", attn_output.shape)
-            print("attn_output[:1, :3, :8] =")
-            print(attn_output[:1, :3, :8])
+       
         return attn_output, attn_weights
 
 class YoutuDecoderLayer(GradientCheckpointingLayer):
@@ -767,10 +760,7 @@ class YoutuDecoderLayer(GradientCheckpointingLayer):
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
-        print("after self.mlp:")
-        print("hidden_states.shape =", hidden_states.shape)
-        print("hidden_states[:1,:3,:8] =")
-        print(hidden_states[:1,:3,:8])
+       
           
         hidden_states = residual + hidden_states
         return hidden_states
@@ -859,8 +849,7 @@ class YoutuModel(YoutuPreTrainedModel):
 
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
-        print("input_ids.shape =", input_ids.shape)
-        print("positions_ids.shape =", position_ids.shape)
+       
         causal_mask = create_causal_mask(
             config=self.config,
             input_embeds=inputs_embeds,
@@ -871,6 +860,9 @@ class YoutuModel(YoutuPreTrainedModel):
         )
 
         hidden_states = inputs_embeds
+        # print("hidden_states after inputs_embeds:",hidden_states[:,:,-8:])
+        # hidden_states = torch.full_like(hidden_states, 0.123)
+        # print("hidden_states after manual setting:",hidden_states[:,:,-8:])
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
         for decoder_layer in self.layers[: self.config.num_hidden_layers]:
