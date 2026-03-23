@@ -290,8 +290,9 @@ class YoutuDecoderLayer(nn.Module):
             hidden_states, residual = self.input_layernorm(hidden_states), hidden_states
         else:
             hidden_states, residual = self.input_layernorm(hidden_states, residual)
-
+        
         hidden_states = self.self_attn(positions, hidden_states)
+        
         hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         # smoke test: 跳过最后的 MLP / MoE
@@ -306,6 +307,7 @@ class YoutuModel(nn.Module):
     ) -> None:
         super().__init__()
         self.embed_tokens = VocabParallelEmbedding(config.vocab_size, config.hidden_size)
+        
         self.layers = nn.ModuleList(
             [YoutuDecoderLayer(config) for _ in range(1)]
         )
@@ -316,15 +318,31 @@ class YoutuModel(nn.Module):
         input_ids: torch.Tensor,
         positions: torch.Tensor,
     ) -> torch.Tensor:
+        context=get_context()
+        print("input_ids.shape =", input_ids.shape)
+        # print("input_ids last 8 dims =",input_ids[-8:] )
+        print("positions.shape =", positions.shape)
+        # print("positions last 8 dims =", positions[-8:])
         hidden_states = self.embed_tokens(input_ids)
+        # print("hidden_states after embed_tokens:",hidden_states[:,-8:])
         residual = None
-
+        # hidden_states = torch.full_like(hidden_states, 0.123)
+        # print("hidden_states after manual setting:",hidden_states[:,-8:])
         hidden_states, residual = self.layers[0](positions, hidden_states, residual)
-
-        print("layer0 hidden_states shape:", hidden_states.shape)
-        print("layer0 hidden_states first token first 10 dims:", hidden_states[0, :10])
+        
+       
 
         hidden_states, _ = self.norm(hidden_states, residual)
+        
+        # --- 就在 return output 的上一行插入 ---
+        if context.is_prefill:
+            print("after self.norm:")
+            print("hidden_states.shape =", hidden_states.shape)
+            print("hidden_states[:, :8] =")
+            print(hidden_states[:, :8])
+        
+                    
+                
         return hidden_states
 
 
