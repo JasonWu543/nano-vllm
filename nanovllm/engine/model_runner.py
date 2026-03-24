@@ -147,7 +147,7 @@ class ModelRunner:
             qk_rope_head_dim = getattr(hf_config, "qk_rope_head_dim", 64)
             latent_dim = kv_lora_rank + qk_rope_head_dim
             assert latent_dim in [512, 576]
-            block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * latent_dim 
+            block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * latent_dim  * hf_config.torch_dtype.itemsize
         else:
             block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * head_dim * hf_config.torch_dtype.itemsize
         config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
