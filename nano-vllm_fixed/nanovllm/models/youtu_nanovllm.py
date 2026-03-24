@@ -270,7 +270,7 @@ class YoutuDecoderLayer(nn.Module):
             kv_lora_rank=config.kv_lora_rank,
             q_lora_rank=config.q_lora_rank,
             max_position=config.max_position_embeddings,
-            rope_theta=config.rope_theta,
+            rope_theta=getattr(config, "rope_theta", None) or config.rope_parameters.get("rope_theta", None),
             rope_scaling=getattr(config, "rope_scaling", None),
             rms_norm_eps=config.rms_norm_eps,
         )

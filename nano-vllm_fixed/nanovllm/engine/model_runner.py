@@ -17,7 +17,7 @@ def get_model_class(hf_config):
     model_type = getattr(hf_config, "model_type", None)
     if model_type == "qwen3":
         return Qwen3ForCausalLM
-    elif model_type == "llama":
+    elif model_type in ("llama","youtu"):
         return YoutuForCausalLM
     else:
         raise ValueError(f"Unknown model: {model_type}")
