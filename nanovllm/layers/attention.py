@@ -88,9 +88,9 @@ class Attention(nn.Module):
             k_rope=k[:,0,self.kv_lora_rank:]  #[N,64]
             kv_c_exp = kv_c.unsqueeze(0).expand(self.num_heads, -1, -1) #[H,N,512]
             w_key_T = self._w_key.transpose(1, 2)   #[H,512,64]
-            k_nope = torch.bmm(kv_c_exp, w_key_T).transpose(0, 1)   #[N,H,64]
+            k_nope = torch.bmm(kv_c_exp, w_key_T).transpose(0, 1)   #[N,H,128]
             k_rope =  k_rope.unsqueeze(1).expand(-1, self.num_heads, -1)    #[N,H,64]
-            k_full=torch.cat([k_nope,k_rope],dim=-1).contiguous()    #[N,H,128]
+            k_full=torch.cat([k_nope,k_rope],dim=-1).contiguous()    #[N,H,192]
             #解压v
             w_vo_T=self._w_vo.transpose(1, 2)   #[H,512,128]
             v_raw=torch.bmm(kv_c_exp, w_vo_T).transpose(0, 1).contiguous()  #[N,H,128]
@@ -145,6 +145,7 @@ class Attention(nn.Module):
                 dv,
                 tile_scheduler_metadata,
                 num_splits,
+                softmax_scale=self.scale,
                 causal=True
             )
         return o.squeeze(1)

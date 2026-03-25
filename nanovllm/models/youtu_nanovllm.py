@@ -83,7 +83,7 @@ class YoutuAttention(nn.Module):
         kv_lora_rank: int,
         q_lora_rank: int | None,
         max_position: int = 4096 * 32,
-        rope_theta: float = 10000,
+        rope_theta: float = 1600000,
         rope_scaling: tuple | None = None,
         rms_norm_eps: float = 1e-6,
     ):
@@ -294,7 +294,6 @@ class YoutuDecoderLayer(nn.Module):
         hidden_states = self.self_attn(positions, hidden_states)
         hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
-        # smoke test: 跳过最后的 MLP / MoE
         return hidden_states, residual
 
 
@@ -307,7 +306,7 @@ class YoutuModel(nn.Module):
         super().__init__()
         self.embed_tokens = VocabParallelEmbedding(config.vocab_size, config.hidden_size)
         self.layers = nn.ModuleList(
-            [YoutuDecoderLayer(config) for _ in range(1)]
+            [YoutuDecoderLayer(config) for _ in range(config.num_hidden_layers)]
         )
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
@@ -319,11 +318,8 @@ class YoutuModel(nn.Module):
         hidden_states = self.embed_tokens(input_ids)
         residual = None
 
-        hidden_states, residual = self.layers[0](positions, hidden_states, residual)
-
-        print("layer0 hidden_states shape:", hidden_states.shape)
-        print("layer0 hidden_states first token first 10 dims:", hidden_states[0, :10])
-
+        for layer in self.layers:
+            hidden_states, residual = layer(positions, hidden_states, residual)
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
 

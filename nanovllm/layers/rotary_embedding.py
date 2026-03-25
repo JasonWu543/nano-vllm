@@ -8,7 +8,8 @@ def apply_rotary_emb(
     cos: torch.Tensor,
     sin: torch.Tensor,
 ) -> torch.Tensor:
-    x1, x2 = torch.chunk(x.float(), 2, dim=-1)
+    x1 = x[..., 0::2] # 取偶数位
+    x2 = x[..., 1::2] # 取奇数位
     y1 = x1 * cos - x2 * sin
     y2 = x2 * cos + x1 * sin
     return torch.cat((y1, y2), dim=-1).to(x.dtype)
